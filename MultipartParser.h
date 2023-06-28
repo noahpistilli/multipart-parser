@@ -5,10 +5,11 @@
 #include <string>
 #include <stdexcept>
 #include <cstring>
+#include <functional>
 
 class MultipartParser {
 public:
-	typedef void (*Callback)(const char *buffer, size_t start, size_t end, void *userData);
+	using Callback = std::function<void(const char *buffer, size_t start, size_t end, void *userData)>;
 	
 private:
 	static const char CR     = 13;
@@ -16,6 +17,7 @@ private:
 	static const char SPACE  = 32;
 	static const char HYPHEN = 45;
 	static const char COLON  = 58;
+  static const char SEMICOLON  = 59;
 	static const size_t UNMARKED = (size_t) -1;
 	
 	enum State {
@@ -122,12 +124,12 @@ private:
 		errorReason = message;
 	}
 	
-	void processPartData(size_t &prevIndex, size_t &index, const char *buffer,
-		size_t len, size_t boundaryEnd, size_t &i, char c, State &state, int &flags)
+	void processPartData(size_t &prevIndex, size_t &_index, const char *buffer,
+		size_t len, size_t boundaryEnd, size_t &i, char c, State &_state, int &_flags)
 	{
-		prevIndex = index;
+		prevIndex = _index;
 		
-		if (index == 0) {
+		if (_index == 0) {
 			// boyer-moore derived algorithm to safely skip non-boundary data
 			while (i + boundarySize <= len) {
 				if (isBoundaryChar(buffer[i + boundaryEnd])) {
@@ -142,77 +144,73 @@ private:
 			c = buffer[i];
 		}
 		
-		if (index < boundarySize) {
-			if (boundary[index] == c) {
-				if (index == 0) {
+		if (_index < boundarySize) {
+			if (boundary[_index] == c) {
+				if (_index == 0) {
 					dataCallback(onPartData, partDataMark, buffer, i, len, true);
 				}
-				index++;
+				_index++;
 			} else {
-				index = 0;
+				_index = 0;
 			}
-		} else if (index == boundarySize) {
-			index++;
+		} else if (_index == boundarySize) {
+			_index++;
 			if (c == CR) {
 				// CR = part boundary
-				flags |= PART_BOUNDARY;
+				_flags |= PART_BOUNDARY;
 			} else if (c == HYPHEN) {
 				// HYPHEN = end boundary
-				flags |= LAST_BOUNDARY;
+				_flags |= LAST_BOUNDARY;
 			} else {
-				index = 0;
+				_index = 0;
 			}
-		} else if (index - 1 == boundarySize) {
-			if (flags & PART_BOUNDARY) {
-				index = 0;
+		} else if (_index - 1 == boundarySize) {
+			if (_flags & PART_BOUNDARY) {
+				_index = 0;
 				if (c == LF) {
 					// unset the PART_BOUNDARY flag
-					flags &= ~PART_BOUNDARY;
+					_flags &= ~PART_BOUNDARY;
 					callback(onPartEnd);
 					callback(onPartBegin);
-					state = HEADER_FIELD_START;
+					_state = HEADER_FIELD_START;
 					return;
 				}
-			} else if (flags & LAST_BOUNDARY) {
+			} else if (_flags & LAST_BOUNDARY) {
 				if (c == HYPHEN) {
                     callback(onPartEnd);
                     callback(onEnd);
-                    state = END;
+                    _state = END;
 				} else {
-					index = 0;
+					_index = 0;
 				}
 			} else {
-				index = 0;
+				_index = 0;
 			}
-		} else if (index - 2 == boundarySize) {
+		} else if (_index - 2 == boundarySize) {
 			if (c == CR) {
-				index++;
+				_index++;
 			} else {
-				index = 0;
+				_index = 0;
 			}
-		} else if (index - boundarySize == 3) {
-			index = 0;
+		} else if (_index - boundarySize == 3) {
+			_index = 0;
 			if (c == LF) {
 				callback(onPartEnd);
 				callback(onEnd);
-				state = END;
+				_state = END;
 				return;
 			}
 		}
 		
-		if (index > 0) {
+		if (_index > 0) {
 			// when matching a possible boundary, keep a lookbehind reference
 			// in case it turns out to be a false lead
-			if (index - 1 >= lookbehindSize) {
+			if (_index - 1 >= lookbehindSize) {
 				setError("Parser bug: index overflows lookbehind buffer. "
 					"Please send bug report with input file attached.");
-				throw std::out_of_range("index overflows lookbehind buffer");
-			} else if (index - 1 < 0) {
-				setError("Parser bug: index underflows lookbehind buffer. "
-					"Please send bug report with input file attached.");
-				throw std::out_of_range("index underflows lookbehind buffer");
+        return;
 			}
-			lookbehind[index - 1] = c;
+			lookbehind[_index - 1] = c;
 		} else if (prevIndex > 0) {
 			// if our boundary turned out to be rubbish, the captured lookbehind
 			// belongs to partData
@@ -269,9 +267,9 @@ public:
 		errorReason     = "Parser uninitialized.";
 	}
 	
-	void setBoundary(const std::string &boundary) {
+	void setBoundary(const std::string &_boundary) {
 		reset();
-		this->boundary = "\r\n--" + boundary;
+		this->boundary = "\r\n--" + _boundary;
 		boundaryData = this->boundary.c_str();
 		boundarySize = this->boundary.size();
 		indexBoundary();
@@ -286,10 +284,10 @@ public:
 			return 0;
 		}
 		
-		State state         = this->state;
-		int flags           = this->flags;
+		State _state         = this->state;
+		int _flags           = this->flags;
 		size_t prevIndex    = this->index;
-		size_t index        = this->index;
+		size_t _index        = this->index;
 		size_t boundaryEnd  = boundarySize - 1;
 		size_t i;
 		char c, cl;
@@ -297,60 +295,60 @@ public:
 		for (i = 0; i < len; i++) {
 			c = buffer[i];
 			
-			switch (state) {
+			switch (_state) {
 			case ERROR:
 				return i;
 			case START:
-				index = 0;
-				state = START_BOUNDARY;
+        _index = 0;
+          _state = START_BOUNDARY;
 			case START_BOUNDARY:
-				if (index == boundarySize - 2) {
+				if (_index == boundarySize - 2) {
 					if (c != CR) {
 						setError("Malformed. Expected CR after boundary.");
 						return i;
 					}
-					index++;
+					_index++;
 					break;
-				} else if (index - 1 == boundarySize - 2) {
+				} else if (_index - 1 == boundarySize - 2) {
 					if (c != LF) {
 						setError("Malformed. Expected LF after boundary CR.");
 						return i;
 					}
-					index = 0;
+          _index = 0;
 					callback(onPartBegin);
-					state = HEADER_FIELD_START;
+          _state = HEADER_FIELD_START;
 					break;
 				}
-				if (c != boundary[index + 2]) {
+				if (c != boundary[_index + 2]) {
 					setError("Malformed. Found different boundary data than the given one.");
 					return i;
 				}
-				index++;
+				_index++;
 				break;
 			case HEADER_FIELD_START:
-				state = HEADER_FIELD;
+        _state = HEADER_FIELD;
 				headerFieldMark = i;
-				index = 0;
+          _index = 0;
 			case HEADER_FIELD:
 				if (c == CR) {
 					headerFieldMark = UNMARKED;
-					state = HEADERS_ALMOST_DONE;
+          _state = HEADERS_ALMOST_DONE;
 					break;
 				}
 
-				index++;
+				_index++;
 				if (c == HYPHEN) {
 					break;
 				}
 
 				if (c == COLON) {
-					if (index == 1) {
+					if (_index == 1) {
 						// empty header field
 						setError("Malformed first header name character.");
 						return i;
 					}
 					dataCallback(onHeaderField, headerFieldMark, buffer, i, len, true);
-					state = HEADER_VALUE_START;
+          _state = HEADER_VALUE_START;
 					break;
 				}
 
@@ -366,12 +364,12 @@ public:
 				}
 				
 				headerValueMark = i;
-				state = HEADER_VALUE;
+          _state = HEADER_VALUE;
 			case HEADER_VALUE:
-				if (c == CR) {
+				if (c == CR && buffer[i-1] != SEMICOLON) {
 					dataCallback(onHeaderValue, headerValueMark, buffer, i, len, true, true);
 					callback(onHeaderEnd);
-					state = HEADER_VALUE_ALMOST_DONE;
+          _state = HEADER_VALUE_ALMOST_DONE;
 				}
 				break;
 			case HEADER_VALUE_ALMOST_DONE:
@@ -379,8 +377,8 @@ public:
 					setError("Malformed header value: LF expected after CR");
 					return i;
 				}
-				
-				state = HEADER_FIELD_START;
+
+          _state = HEADER_FIELD_START;
 				break;
 			case HEADERS_ALMOST_DONE:
 				if (c != LF) {
@@ -389,14 +387,16 @@ public:
 				}
 				
 				callback(onHeadersEnd);
-				state = PART_DATA_START;
+          _state = PART_DATA_START;
 				break;
 			case PART_DATA_START:
-				state = PART_DATA;
+        _state = PART_DATA;
 				partDataMark = i;
 			case PART_DATA:
-				processPartData(prevIndex, index, buffer, len, boundaryEnd, i, c, state, flags);
+				processPartData(prevIndex, _index, buffer, len, boundaryEnd, i, c, _state, _flags);
 				break;
+      case END:
+        break;
 			default:
 				return i;
 			}
@@ -406,9 +406,9 @@ public:
 		dataCallback(onHeaderValue, headerValueMark, buffer, i, len, false);
 		dataCallback(onPartData, partDataMark, buffer, i, len, false);
 		
-		this->index = index;
-		this->state = state;
-		this->flags = flags;
+		this->index = _index;
+		this->state = _state;
+		this->flags = _flags;
 		
 		return len;
 	}
